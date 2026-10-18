@@ -102,11 +102,6 @@ jobs:
       full: ${{ steps.paths.outputs.full }}
       # Code changed on a pull request that has no approved-for-ci label yet: only Quick compile.
       quick: ${{ steps.paths.outputs.quick }}
-      # An approved fork pull request whose approval is this very run: its heavy jobs run on the
-      # trusted self-hosted-fast runners, in private copies of the warm directories (fork-scratch.sh).
-      # Only the `labeled` event qualifies, so a later push to the fork's branch (unreviewed code)
-      # falls back to the fork routing above until a maintainer labels it again. `local` stays false.
-      fork_heavy: ${{ github.event_name == 'pull_request' && github.event.action == 'labeled' && github.event.label.name == 'approved-for-ci' && github.event.pull_request.head.repo.full_name != github.repository }}
       packages: ${{ steps.paths.outputs.packages }}
       oracle: ${{ steps.paths.outputs.oracle }}
       # Whether the other Linux jobs use the self-hosted runners too.
@@ -287,13 +282,10 @@ jobs:
     name: Native Linux Clippy
     needs: changes
     if: needs.changes.outputs.native == 'true'
-    runs-on: ${{ needs.changes.outputs.fork_heavy == 'true' && 'self-hosted-fast' || needs.changes.outputs.local == 'true' && 'self-hosted-fast' || 'ubuntu-24.04' }}
+    runs-on: ${{ needs.changes.outputs.local == 'true' && 'self-hosted-fast' || 'ubuntu-24.04' }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Private build, Cargo and rustup directories (approved fork pull request)
-        if: needs.changes.outputs.fork_heavy == 'true'
-        run: scripts/ci/fork-scratch.sh clippy
       - name: Warm build directory (self-hosted runner)
         if: runner.environment == 'self-hosted' && !(github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository)
         run: scripts/ci/warm-target.sh clippy
@@ -316,15 +308,12 @@ jobs:
           scope=(--workspace)
           if [ "$FULL" != true ]; then scope=(); for p in $PACKAGES; do scope+=(-p "$p"); done; fi
           cargo clippy "${scope[@]}" --all-targets --profile ci --locked -- -D warnings
-      - name: Delete the private directories
-        if: always() && needs.changes.outputs.fork_heavy == 'true'
-        run: scripts/ci/fork-scratch.sh --clean
 
   build-tests:
     name: Build tests
     needs: changes
     if: needs.changes.outputs.native == 'true'
-    runs-on: ${{ needs.changes.outputs.fork_heavy == 'true' && 'self-hosted-fast' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && (endsWith(format('{0}', github.event.pull_request.number), '7') || endsWith(format('{0}', github.event.pull_request.number), '8') || endsWith(format('{0}', github.event.pull_request.number), '9'))) && 'self-hosted-untrusted' || 'ubuntu-24.04' }}
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && (endsWith(format('{0}', github.event.pull_request.number), '7') || endsWith(format('{0}', github.event.pull_request.number), '8') || endsWith(format('{0}', github.event.pull_request.number), '9'))) && 'self-hosted-untrusted' || 'ubuntu-24.04' }}
     # Fork builds compile inside gVisor on shared boxes; give them room to finish and upload.
     timeout-minutes: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && (endsWith(format('{0}', github.event.pull_request.number), '7') || endsWith(format('{0}', github.event.pull_request.number), '8') || endsWith(format('{0}', github.event.pull_request.number), '9'))) && 90 || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 60 || 45 }}
     env:
@@ -334,9 +323,6 @@ jobs:
       SCCACHE_IGNORE_SERVER_IO_ERROR: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Private build, Cargo and rustup directories (approved fork pull request)
-        if: needs.changes.outputs.fork_heavy == 'true'
-        run: scripts/ci/fork-scratch.sh
       - name: Size parallel compiles to the job's memory
         run: scripts/ci/build-jobs.sh
       - uses: dtolnay/rust-toolchain@stable
@@ -369,14 +355,11 @@ jobs:
       - name: Compiler cache statistics
         if: always()
         run: sccache --show-stats
-      - name: Delete the private directories
-        if: always() && needs.changes.outputs.fork_heavy == 'true'
-        run: scripts/ci/fork-scratch.sh --clean
 
   tests:
     name: Native Linux tests (${{ matrix.shard }}/4)
     needs: [changes, build-tests]
-    runs-on: ${{ needs.changes.outputs.fork_heavy == 'true' && 'self-hosted-fast' || needs.changes.outputs.local == 'true' && 'self-hosted-fast' || ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && (endsWith(format('{0}', github.event.pull_request.number), '7') || endsWith(format('{0}', github.event.pull_request.number), '8') || endsWith(format('{0}', github.event.pull_request.number), '9'))) && 'self-hosted-untrusted' || 'ubuntu-24.04') }}
+    runs-on: ${{ needs.changes.outputs.local == 'true' && 'self-hosted-fast' || ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && (endsWith(format('{0}', github.event.pull_request.number), '7') || endsWith(format('{0}', github.event.pull_request.number), '8') || endsWith(format('{0}', github.event.pull_request.number), '9'))) && 'self-hosted-untrusted' || 'ubuntu-24.04') }}
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -391,9 +374,6 @@ jobs:
       SOLIDCRAFT_REQUIRE_GPU: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Private build, Cargo and rustup directories (approved fork pull request)
-        if: needs.changes.outputs.fork_heavy == 'true'
-        run: scripts/ci/fork-scratch.sh
       - name: Install a software Vulkan driver (lavapipe)
         # Preinstalled on the self-hosted runner, which has no sudo.
         if: runner.environment == 'github-hosted'
@@ -445,9 +425,6 @@ jobs:
           name: junit-${{ matrix.shard }}
           path: target/nextest/ci/junit.xml
           retention-days: 7
-      - name: Delete the private directories
-        if: always() && needs.changes.outputs.fork_heavy == 'true'
-        run: scripts/ci/fork-scratch.sh --clean
 
   action-matrix:
     # Every ordinary action on every face, edge, vertex and body of the design corpus, against
@@ -545,7 +522,7 @@ jobs:
     name: Doc tests
     needs: changes
     if: needs.changes.outputs.native == 'true'
-    runs-on: ${{ needs.changes.outputs.fork_heavy == 'true' && 'self-hosted-fast' || needs.changes.outputs.local == 'true' && 'self-hosted-fast' || 'ubuntu-24.04' }}
+    runs-on: ${{ needs.changes.outputs.local == 'true' && 'self-hosted-fast' || 'ubuntu-24.04' }}
     timeout-minutes: 45
     env:
       CARGO_INCREMENTAL: "0"
@@ -554,9 +531,6 @@ jobs:
       SCCACHE_IGNORE_SERVER_IO_ERROR: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Private build, Cargo and rustup directories (approved fork pull request)
-        if: needs.changes.outputs.fork_heavy == 'true'
-        run: scripts/ci/fork-scratch.sh doc-tests
       - name: Size parallel compiles to the job's memory
         run: scripts/ci/build-jobs.sh
       - name: Warm build directory (self-hosted runner)
@@ -596,9 +570,6 @@ jobs:
             exit 0
           fi
           cargo test "${scope[@]}" --profile ci --locked --doc
-      - name: Delete the private directories
-        if: always() && needs.changes.outputs.fork_heavy == 'true'
-        run: scripts/ci/fork-scratch.sh --clean
 
   oracle:
     name: Reference tests
@@ -700,9 +671,6 @@ jobs:
 
   # Preserve the existing check name for branch protection, including docs-only PRs.
   ci:
-    # On the skipped run another label starts, this job is named differently, so that skipped job
-    # can never stand in for the required `ci` check of the pull request's real run.
-    name: ${{ github.event.action == 'labeled' && github.event.label.name != 'approved-for-ci' && 'ci (ignored label)' || 'ci' }}
     needs: [changes, checks, quick-compile, clippy, build-tests, tests, doc-tests, oracle, windows-fxc, windows-startup]
     if: always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) && (github.event.action != 'labeled' || github.event.label.name == 'approved-for-ci')
     runs-on: ${{ needs.changes.outputs.local == 'true' && 'self-hosted-light' || 'ubuntu-24.04' }}
