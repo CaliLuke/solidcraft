@@ -671,6 +671,9 @@ jobs:
 
   # Preserve the existing check name for branch protection, including docs-only PRs.
   ci:
+    # On the skipped run another label starts, this job is named differently, so that skipped job
+    # can never stand in for the required `ci` check of the pull request's real run.
+    name: ${{ github.event.action == 'labeled' && github.event.label.name != 'approved-for-ci' && 'ci (ignored label)' || 'ci' }}
     needs: [changes, checks, quick-compile, clippy, build-tests, tests, doc-tests, oracle, windows-fxc, windows-startup]
     if: always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) && (github.event.action != 'labeled' || github.event.label.name == 'approved-for-ci')
     runs-on: ${{ needs.changes.outputs.local == 'true' && 'self-hosted-light' || 'ubuntu-24.04' }}
