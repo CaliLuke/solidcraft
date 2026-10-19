@@ -171,7 +171,7 @@ fn an_edit_after_opening_evaluates_from_the_feature_it_changes() {
     s.execute("timeline.rollback", &json!({"position": n - 2})).unwrap();
     assert_eq!(kept(&s), n - 2, "rolled back");
     s.execute("timeline.rollback", &json!({})).unwrap();
-    assert_eq!(kept(&s), n - 2);
+    assert_eq!(kept(&s), n, "rolled forward: the features after the marker take their saved results again");
     // Suppressing the second-to-last feature keeps every state before it.
     let k = s.doc.features[n - 2].id;
     s.execute("timeline.suppress", &json!({"feature": k, "suppressed": true})).unwrap();
@@ -183,6 +183,27 @@ fn an_edit_after_opening_evaluates_from_the_feature_it_changes() {
     s.execute("solid.box", &json!({"length": 3, "width": 3, "height": 3, "operation": "new"})).unwrap();
     assert_eq!(s.model.results.len(), n + 1);
     assert!(s.model.results.iter().zip(&read).all(|(r, st)| Arc::ptr_eq(&r.state, st)), "only the new feature evaluated");
+    let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_file(format!("{}.bak", path.display()));
+}
+
+/// An edit made after opening and undone finds the saved results again: undo evaluates nothing.
+#[test]
+fn undoing_an_edit_after_opening_reuses_the_saved_results() {
+    let plate = solidcraft_engine::sample::samples().into_iter().find(|s| s.name == "Sample Plate").unwrap();
+    let mut built = Session::default();
+    for c in (plate.script)()["commands"].as_array().unwrap() {
+        built.execute(c["command"].as_str().unwrap(), &c["params"]).unwrap();
+    }
+    let path = temp("undo");
+    built.execute("file.save_as", &json!({"path": path.to_string_lossy()})).unwrap();
+    let mut s = open(&path);
+    let read: Vec<Arc<ModelState>> = s.model.results.iter().map(|r| r.state.clone()).collect();
+    let first = s.doc.features[1].id;
+    s.execute("timeline.suppress", &json!({"feature": first, "suppressed": true})).unwrap();
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(s.model.last_recomputed, 0, "taken from the saved results");
+    assert!(s.model.results.iter().zip(&read).all(|(r, st)| Arc::ptr_eq(&r.state, st)), "the very states read from the file");
     let _ = std::fs::remove_file(&path);
     let _ = std::fs::remove_file(format!("{}.bak", path.display()));
 }

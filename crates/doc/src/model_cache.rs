@@ -281,6 +281,8 @@ impl SavedModel {
                 b.source_transform = m;
             }
             b.transferred = r.get("transferred").and_then(Json::as_bool).unwrap_or(false);
+            // Measured once here, so every state holding it adds it up for the cache's budget.
+            b.bytes = b.body.retained_bytes();
             if let Some(look) = r.get("imported") {
                 let faces: Vec<(String, [f32; 3], f32)> = serde_json::from_value(parse(look.get("faces"))?).map_err(|_| bad("saved model: look"))?;
                 b.imported = Some(Arc::new(crate::appearance::ImportedLook {
@@ -372,6 +374,9 @@ impl Model {
         let (vals, param_errors) = evaluation_values(doc);
         let step_digests = StepDigests::of(doc, &StepDigests::default());
         let marker = doc.marker.unwrap_or(usize::MAX);
+        let ctx = context_digest(doc, &vals);
+        let mut cache = EvalCache::default();
+        let mut before = Arc::new(ModelState::default());
         let mut prev = 0;
         let mut results = Vec::with_capacity(features.len());
         for (i, (f, r)) in doc.features.iter().zip(features).enumerate() {
@@ -380,7 +385,7 @@ impl Model {
                 return Err(bad("saved model: the document changed"));
             }
             let ms = r.get("ms").and_then(Json::as_f64).filter(|ms| ms.is_finite()).ok_or_else(|| bad("saved model: time"))?;
-            results.push(FeatureResult {
+            let result = FeatureResult {
                 id: f.id,
                 name: f.name.clone(),
                 error: None,
@@ -394,8 +399,26 @@ impl Model {
                 stale: false,
                 fingerprint: prev,
                 state: states.get(index(r.get("state"), states.len())?).cloned().ok_or_else(|| bad("saved model: state"))?,
-            });
+            };
+            // Each result where an evaluation would have put it, so an edit undone (or set back)
+            // finds it again rather than evaluating the feature anew.
+            if !result.skipped {
+                let local = fingerprint(0, f, &vals, false, &step_digests) ^ placement_digest(doc, f);
+                cache.put(
+                    cache_key(f, prev, local, ctx, &before),
+                    CachedEval {
+                        error: None,
+                        warning: result.warning.clone(),
+                        boolean_diagnostics: result.boolean_diagnostics.clone(),
+                        ms,
+                        bytes: result.state.retained_bytes(),
+                        state: result.state.clone(),
+                    },
+                );
+                before = result.state.clone();
+            }
+            results.push(result);
         }
-        Ok(Model { results, param_errors, step_digests, ..Model::default() })
+        Ok(Model { results, param_errors, step_digests, cache: Arc::new(std::sync::Mutex::new(cache)), ..Model::default() })
     }
 }
