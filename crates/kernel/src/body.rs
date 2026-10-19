@@ -50,6 +50,10 @@ pub struct Body {
     /// part is tessellated once rather than once per instance. Dropped by anything that changes
     /// what the body shows (its geometry is never changed in place).
     pub(crate) display_of: Option<std::sync::Arc<(std::sync::Arc<SharedDisplay>, [[f64; 4]; 4])>>,
+    /// Its revolved faces were turned away from their seams (see `rephase_revolved`), so a
+    /// placed copy, which keeps them where they are, need not turn them again: searching every
+    /// revolved face of every placed occurrence was most of the time moving an assembly took.
+    pub(crate) phased: bool,
 }
 
 /// The display mesh of a body that several placed copies show (see `Body::display_of`): the
@@ -378,6 +382,8 @@ fn refined_with_cache(pm: &PolygonMesh, surf: &mt::Surface, tol: f64, memoize: b
 /// (same geometry) so the face sits around angle π, well away from the wrap.
 fn rephase_revolved(solid: Solid) -> Solid {
     use mt::{BoundedCurve, ParametricCurve, SearchNearestParameter};
+    #[cfg(test)]
+    REPHASED.with(|n| n.set(n.get() + 1));
     let r = guard("rephase", || {
         let mut changed = false;
         let mut shells = Vec::new();
@@ -496,6 +502,8 @@ fn polyline_mid(pts: &[Vec3]) -> (Vec3, f64) {
 thread_local! {
     /// Solids [`Body::new`] meshed on this thread to orient them (tests count the work an import does).
     pub(crate) static ORIENTED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// Solids `rephase_revolved` searched on this thread.
+    pub(crate) static REPHASED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// Deflection the orientation mesh uses: coarse enough for a large solid, fine enough that a
@@ -593,6 +601,7 @@ impl Body {
             regularization_protected: false,
             history: None,
             display_of: None,
+            phased: true,
         })
     }
 
@@ -601,11 +610,12 @@ impl Body {
     /// unless it mirrors them, so its orientation is read from the matrix rather than meshed
     /// again. Only for closed solids; `coarse` is the input's cached missing-face count, which a
     /// rigid placement preserves exactly.
-    pub(crate) fn new_placed(solid: Solid, flip: bool, coarse: Option<(f64, usize)>) -> Result<Body> {
+    /// `phased`: the solid was placed from a body whose revolved faces are turned already.
+    pub(crate) fn new_placed(solid: Solid, flip: bool, coarse: Option<(f64, usize)>, phased: bool) -> Result<Body> {
         if solid.boundaries().is_empty() {
             return Err(KernelError::Failed("empty result".into()));
         }
-        Body::placed_as_is(rephase_revolved(solid), flip, coarse)
+        Body::placed_as_is(if phased { solid } else { rephase_revolved(solid) }, flip, coarse)
     }
 
     /// [`Body::new_placed`] for a solid whose revolved faces were already turned away from
@@ -631,6 +641,7 @@ impl Body {
             regularization_protected: false,
             history: None,
             display_of: None,
+            phased: true,
         })
     }
 

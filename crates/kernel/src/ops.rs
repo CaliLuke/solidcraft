@@ -1739,6 +1739,7 @@ pub fn transform_matrix(body: &Body, m: [[f64; 4]; 4]) -> Result<Body> {
             edges.as_ref(),
             det3(&m) < 0.0,
             rigid_placement(&m).then_some(body.coarse_missing).flatten(),
+            body.phased,
         )?;
         Ok(placed.with_color(body.color()).with_paint(body.paint().cloned()).with_face_sources(sources).inherit_regularization_protection(body))
     })
