@@ -136,7 +136,7 @@ fn write_container(
     doc: &Document,
     compression: DesignCompression,
     preview: Option<&DesignPreview>,
-    geometry: Option<&solidcraft_doc::ModelState>,
+    geometry: Option<&solidcraft_doc::SavedModel>,
     thumbnail: Option<&[u8]>,
     budget: usize,
 ) -> Result<Vec<u8>> {
