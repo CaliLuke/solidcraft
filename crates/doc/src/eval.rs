@@ -55,6 +55,9 @@ pub struct ModelBody {
     /// [`Body::retained_bytes`] of `body`, measured when a feature made or changed it (0: not
     /// measured), so the evaluation cache's budget does not walk every body after every feature.
     bytes: usize,
+    /// [`Body::outline_bounds`] of `body` (with the body it was measured on), worked out once
+    /// and shared by clones.
+    outline: Arc<OnceLock<(Body, solidcraft_geom::Aabb3)>>,
 }
 
 impl ModelBody {
@@ -76,6 +79,16 @@ impl ModelBody {
             transferred: false,
             imported: None,
             bytes: 0,
+            outline: Arc::new(OnceLock::new()),
+        }
+    }
+
+    /// A box around the body without meshing it ([`Body::outline_bounds`]), worked out once.
+    pub fn outline_bounds(&self) -> solidcraft_geom::Aabb3 {
+        match self.outline.get_or_init(|| (self.body.clone(), self.body.outline_bounds())) {
+            (measured, b) if measured.same(&self.body) => *b,
+            // The body was replaced in this cell's holder since: measure it again.
+            _ => self.body.outline_bounds(),
         }
     }
     pub fn definition_name(&self) -> &str {
